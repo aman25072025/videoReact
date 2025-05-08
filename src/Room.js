@@ -281,16 +281,74 @@ const Room = ({ roomId }) => {
       setPeers([...peersRef.current]);
     });
 
+    return peer;
+  }
+
+  // Helper: add peer (viewer accepts call)
+  function addPeer(incomingSignal, from, stream) {
+    console.log(`Adding peer for from: ${from}, stream: ${!!stream}`, { incomingSignal });
+
+    // Check if a peer for this connection already exists
+    const existingPeer = peersRef.current.find(p => p.peerID === from);
+    if (existingPeer) {
+      console.warn(`Peer connection already exists for ${from}, destroying existing connection`);
+      try {
+        existingPeer.peer.destroy();
+      } catch (err) {
+        console.error('Error destroying existing peer:', err);
+      }
+      peersRef.current = peersRef.current.filter(p => p.peerID !== from);
+      setPeers([...peersRef.current]);
+    }
+
+    const peer = new Peer({
+      initiator: false,
+      trickle: false,
+      stream: stream || undefined,
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          {
+            urls: 'turn:openrelay.metered.ca:80',
+            username: 'openrelayproject',
+            credential: 'openrelayproject',
+          },
+        ],
+      },
+    });
+
+    // Comprehensive connection tracking
+    const connectionLog = {
+      created: Date.now(),
+      signalReceived: false,
+      connected: false,
+      streamReceived: false,
+      closed: false,
+      error: null,
+      from
+    };
+
+    peer.on('signal', (signal) => {
+      connectionLog.signalReceived = true;
+      console.log(`Signal generated for accepting call from ${from}`, {
+        existingPeers: peersRef.current.length
+      });
+      socket.emit('BE-accept-call', { signal, to: from });
+    });
+
+    peer.on('connect', () => {
+      connectionLog.connected = true;
       console.log(`Peer connection FULLY established with ${from}`, {
         duration: Date.now() - connectionLog.created,
-        connectionLog
+        existingPeers: peersRef.current.length
       });
     });
 
     peer.on('stream', (receivedStream) => {
       connectionLog.streamReceived = true;
       console.log(`Stream received from ${from}`, {
-        streamTracks: receivedStream.getTracks().map(t => t.kind)
+        streamTracks: receivedStream.getTracks().map(t => t.kind),
+        existingPeers: peersRef.current.length
       });
       setRemoteStreams((prev) => ({
         ...prev, 
