@@ -126,7 +126,7 @@ const Room = ({ roomId }) => {
         try {
           // Comprehensive state check
           if (item.peer.destroyed || item.peer.closed) {
-            console.warn('Peer connection is in an invalid state', { 
+            console.warn(`Peer connection with ${answerId} is in an invalid state`, { 
               destroyed: item.peer.destroyed, 
               closed: item.peer.closed 
             });
@@ -139,7 +139,7 @@ const Room = ({ roomId }) => {
 
           // Attempt to signal with additional safety
           if (item.peer.connecting) {
-            console.warn('Peer is still connecting, delaying signal');
+            console.warn(`Peer ${answerId} is still connecting, delaying signal`);
             setTimeout(() => {
               try {
                 item.peer.signal(signal);
@@ -151,11 +151,13 @@ const Room = ({ roomId }) => {
             item.peer.signal(signal);
           }
         } catch (err) {
-          console.error('Error signaling peer:', err);
+          console.error(`Error signaling peer ${answerId}:`, err);
           // Remove the problematic peer
           peersRef.current = peersRef.current.filter(p => p.peerID !== answerId);
           setPeers([...peersRef.current]);
         }
+      } else {
+        console.warn(`No peer found for ${answerId}, potential race condition`);
       }
     };
     socket.on('FE-call-accepted', handleCallAccepted);
@@ -170,6 +172,19 @@ const Room = ({ roomId }) => {
   // Helper: create peer (broadcaster initiates)
   function createPeer(userToCall, from, stream) {
     console.log(`Creating peer for userToCall: ${userToCall}, from: ${from}, stream: ${!!stream}`);
+
+    // Check if a peer for this connection already exists
+    const existingPeer = peersRef.current.find(p => p.peerID === userToCall);
+    if (existingPeer) {
+      console.warn(`Peer connection already exists for ${userToCall}, destroying existing connection`);
+      try {
+        existingPeer.peer.destroy();
+      } catch (err) {
+        console.error('Error destroying existing peer:', err);
+      }
+      peersRef.current = peersRef.current.filter(p => p.peerID !== userToCall);
+      setPeers([...peersRef.current]);
+    }
 
     const peer = new Peer({
       initiator: true,
@@ -187,19 +202,25 @@ const Room = ({ roomId }) => {
       },
     });
 
-    // Detailed connection tracking
+    // Comprehensive connection tracking
     const connectionLog = {
       created: Date.now(),
       signalReceived: false,
       connected: false,
       streamReceived: false,
       closed: false,
-      error: null
+      error: null,
+      userToCall,
+      from
     };
 
     peer.on('signal', (signal) => {
       connectionLog.signalReceived = true;
-      console.log(`Signal generated for ${userToCall}`, { signal });
+      console.log(`Signal generated for ${userToCall}`, { 
+        signal, 
+        from,
+        existingPeers: peersRef.current.length 
+      });
       socket.emit('BE-call-user', { userToCall, from, signal });
     });
 
@@ -207,6 +228,7 @@ const Room = ({ roomId }) => {
       connectionLog.connected = true;
       console.log(`Peer connection FULLY established with ${userToCall}`, {
         duration: Date.now() - connectionLog.created,
+        existingPeers: peersRef.current.length,
         connectionLog
       });
     });
@@ -214,7 +236,8 @@ const Room = ({ roomId }) => {
     peer.on('stream', (receivedStream) => {
       connectionLog.streamReceived = true;
       console.log(`Stream received from ${userToCall}`, {
-        streamTracks: receivedStream.getTracks().map(t => t.kind)
+        streamTracks: receivedStream.getTracks().map(t => t.kind),
+        existingPeers: peersRef.current.length
       });
       setRemoteStreams((prev) => ({
         ...prev, 
@@ -226,6 +249,7 @@ const Room = ({ roomId }) => {
       connectionLog.closed = true;
       console.warn(`Peer connection CLOSED with ${userToCall}`, {
         duration: Date.now() - connectionLog.created,
+        existingPeers: peersRef.current.length,
         connectionLog
       });
       
@@ -243,6 +267,7 @@ const Room = ({ roomId }) => {
       connectionLog.error = err.toString();
       console.error(`Comprehensive Peer ERROR with ${userToCall}:`, {
         error: err,
+        existingPeers: peersRef.current.length,
         connectionLog
       });
 
@@ -256,47 +281,6 @@ const Room = ({ roomId }) => {
       setPeers([...peersRef.current]);
     });
 
-    return peer;
-  }
-
-  // Helper: add peer (viewer answers)
-  function addPeer(incomingSignal, from, stream) {
-    console.log(`Adding peer for from: ${from}, stream: ${!!stream}`, { incomingSignal });
-
-    const peer = new Peer({
-      initiator: false,
-      trickle: false,
-      stream: stream || undefined,
-      config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          {
-            urls: 'turn:openrelay.metered.ca:80',
-            username: 'openrelayproject',
-            credential: 'openrelayproject',
-          },
-        ],
-      },
-    });
-
-    // Detailed connection tracking
-    const connectionLog = {
-      created: Date.now(),
-      signalReceived: false,
-      connected: false,
-      streamReceived: false,
-      closed: false,
-      error: null
-    };
-
-    peer.on('signal', (signal) => {
-      connectionLog.signalReceived = true;
-      console.log(`Signal generated for ${from}`, { signal });
-      socket.emit('BE-accept-call', { signal, to: from });
-    });
-
-    peer.on('connect', () => {
-      connectionLog.connected = true;
       console.log(`Peer connection FULLY established with ${from}`, {
         duration: Date.now() - connectionLog.created,
         connectionLog
