@@ -8,7 +8,7 @@ module.exports = {
   output: {
     path: path.resolve(__dirname, 'build'),
     filename: 'bundle.js',
-    publicPath: '/videoReact/',
+    publicPath: '/',
     clean: true,
   },
   module: {
@@ -37,7 +37,7 @@ module.exports = {
     historyApiFallback: true,
     open: true,
   },
-  mode: 'production',
+  mode: 'development',
   plugins: [
     new CleanWebpackPlugin(),
     new webpack.ProvidePlugin({
