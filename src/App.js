@@ -19,7 +19,7 @@ function App() {
   if (!joined) {
     return (
       <div style={{ textAlign: 'center', marginTop: 80 }}>
-        <h2>Enter Room No</h2>
+        <h2>Enter Room No28</h2>
         <form onSubmit={handleJoin}>
           <input
             type="text"

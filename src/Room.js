@@ -3,555 +3,497 @@ import Peer from 'simple-peer';
 import socket from './socket';
 
 const Room = ({ roomId }) => {
-  const [role, setRole] = useState(null);
-  const [peers, setPeers] = useState([]); // Array of { peerID, peer }
-  const [remoteStreams, setRemoteStreams] = useState({}); // peerID: stream
-  const [joined, setJoined] = useState(false);
-  const [isAudioMuted, setIsAudioMuted] = useState(false);
-  const [isVideoOff, setIsVideoOff] = useState(false);
-  const userVideoRef = useRef();
-  const userStream = useRef();
-  const peersRef = useRef([]);
-  const [broadcasterId, setBroadcasterId] = useState(null);
-  const [activeSpeaker, setActiveSpeaker] = useState(null);
-  const [raisedHands, setRaisedHands] = useState([]);
-  
-  const handleRoleSelect = (selectedRole) => {
-    setRole(selectedRole);
-    const userName = 'user' + Date.now();
-    socket.emit('BE-join-room', { roomId, userName, role: selectedRole });
-    setJoined(true);
+    const [role, setRole] = useState(null);
+    const [peers, setPeers] = useState([]);
+    const [remoteStreams, setRemoteStreams] = useState({});
+    const [joined, setJoined] = useState(false);
+    const [isAudioMuted, setIsAudioMuted] = useState(false);
+    const [isVideoOff, setIsVideoOff] = useState(false);
+    const [handRaised, setHandRaised] = useState(false);
+    const userVideoRef = useRef();
+    const userStream = useRef();
+    const peersRef = useRef([]);
+    const [broadcasterId, setBroadcasterId] = useState(null);
+    const [raisedHands, setRaisedHands] = useState([]);
+    const [isApproved, setIsApproved] = useState(false);
+    const [approvedSpeakers, setApprovedSpeakers] = useState([]);
 
-    if (selectedRole === 'broadcaster' || selectedRole === 'viewer') {
-      navigator.mediaDevices
-        .getUserMedia({
-          video: true,
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            channelCount: 1,
-            sampleRate: 48000,
-            sampleSize: 16
-          }
-        })
-        .then((stream) => {
-          console.log('Got media stream:', stream.getAudioTracks().length > 0 ? 'Has audio' : 'No audio');
-          if (stream.getAudioTracks().length > 0) {
-            console.log('Audio track settings:', stream.getAudioTracks()[0].getSettings());
-          }
-          userStream.current = stream;
-          if (userVideoRef.current) {
-            userVideoRef.current.srcObject = stream;
-          }
-        })
-        .catch((err) => {
-          console.error('Error accessing media devices:', err);
-          alert('Failed to access camera/microphone. Please ensure you have granted permissions.');
-        });
-    }
-  };
+    const handleRoleSelect = (selectedRole) => {
+        setRole(selectedRole);
+        const userName = 'User-' + Date.now();
+        socket.emit('BE-join-room', { roomId, userName, role: selectedRole });
+        setJoined(true);
 
-  useEffect(() => {
-    return () => {
-      if (joined) {
-        socket.emit('BE-leave-room', { roomId, leaver: socket.id });
-        peersRef.current.forEach(({ peer }) => peer.destroy());
-        if (userStream.current) {
-          userStream.current.getTracks().forEach((t) => t.stop());
-        }
-      }
-    };
-  }, [joined, roomId]);
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+            .then((stream) => {
+                // 👇 Disable mic and camera *before* assigning to video element
+                if (selectedRole === 'viewer') {
+                    stream.getAudioTracks().forEach(track => (track.enabled = false));
+                    stream.getVideoTracks().forEach(track => (track.enabled = false));
+                }
 
-  useEffect(() => {
-    const handleAssignRole = ({ role, broadcasterId }) => {
-      setRole(role);
-      setBroadcasterId(broadcasterId);
-      if (role === 'viewer') {
-        navigator.mediaDevices
-          .getUserMedia({
-            video: true,
-            audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true,
-              channelCount: 1,
-              sampleRate: 48000,
-              sampleSize: 16
-            }
-          })
-          .then((stream) => {
-            console.log('Got media stream:', stream.getAudioTracks().length > 0 ? 'Has audio' : 'No audio');
-            if (stream.getAudioTracks().length > 0) {
-              console.log('Audio track settings:', stream.getAudioTracks()[0].getSettings());
-            }
-            userStream.current = stream;
-            if (userVideoRef.current) {
-              userVideoRef.current.srcObject = stream;
-            }
-          })
-          .catch((err) => {
-            console.error('Error accessing media devices:', err);
-            alert('Failed to access camera/microphone. Please ensure you have granted permissions.');
-          });
-      }
-    };
-    socket.on('FE-assign-role', handleAssignRole);
-    return () => socket.off('FE-assign-role', handleAssignRole);
-  }, []);
+                userStream.current = stream;
 
-  useEffect(() => {
-    if (!role) return;
+                if (userVideoRef.current) {
+                    userVideoRef.current.srcObject = stream;
+                }
 
-    const handleUserJoin = (users) => {
-      if (role !== 'broadcaster') return;
-
-      users.forEach(({ userId }) => {
-        if (
-          userId === socket.id ||
-          peersRef.current.some((p) => p.peerID === userId)
-        )
-          return;
-
-        const peer = createPeer(userId, socket.id, userStream.current);
-        peersRef.current.push({ peerID: userId, peer });
-        setPeers([...peersRef.current]);
-      });
+                setIsAudioMuted(selectedRole === 'viewer');
+                setIsVideoOff(selectedRole === 'viewer');
+            })
+            .catch((err) => {
+                console.error('Media error:', err);
+                alert('Failed to access camera/mic.');
+            });
     };
 
-    socket.on('FE-user-join', handleUserJoin);
-    return () => socket.off('FE-user-join', handleUserJoin);
-  }, [role]);
 
-  useEffect(() => {
-    if (!role) return;
 
-    const handleReceiveCall = ({ signal, from }) => {
-      if (peersRef.current.some((p) => p.peerID === from)) return;
-      console.log('Received call from:', from, 'Current role:', role);
+    useEffect(() => {
+        return () => {
+            if (joined) {
+                socket.emit('BE-leave-room', { roomId, leaver: socket.id });
+                peersRef.current.forEach(({ peer }) => peer.destroy());
+                if (userStream.current) userStream.current.getTracks().forEach((t) => t.stop());
+                setApprovedSpeakers(prev => prev.filter(id => id !== socket.id));
+            }
+        };
+    }, [joined, roomId]);
 
-      // For viewer, we need to create a new peer with our stream
-      if (role === 'viewer' && userStream.current) {
-        console.log('Viewer creating peer with stream:', userStream.current.getAudioTracks().length > 0 ? 'Has audio' : 'No audio');
+    useEffect(() => {
+        const handleAssignRole = ({ role, broadcasterId }) => {
+            setRole(role);
+            setBroadcasterId(broadcasterId);
+        };
+        socket.on('FE-assign-role', handleAssignRole);
+        return () => socket.off('FE-assign-role', handleAssignRole);
+    }, []);
 
+    useEffect(() => {
+        if (!role) return;
+
+        const handleUserJoin = (users) => {
+            if (role !== 'broadcaster') return;
+            users.forEach(({ userId }) => {
+                if (userId === socket.id || peersRef.current.some(p => p.peerID === userId)) return;
+                const peer = createPeer(userId, socket.id, userStream.current);
+                peersRef.current.push({ peerID: userId, peer });
+                setPeers([...peersRef.current]);
+            });
+        };
+        const handleViewerStopped = ({ userId }) => {
+            setApprovedSpeakers(prev => prev.filter(id => id !== userId));
+        };
+        socket.on('FE-viewer-stopped', handleViewerStopped); // broadcaster removes from approved list
+        socket.on('FE-user-join', handleUserJoin);
+        return () => {
+            socket.off('FE-viewer-stopped', handleViewerStopped);
+            socket.off('FE-user-join', handleUserJoin);
+        };
+    }, [role]);
+
+    useEffect(() => {
+        if (!role) return;
+
+        const handleReceiveCall = ({ signal, from }) => {
+            if (peersRef.current.some(p => p.peerID === from)) return;
+
+            const peer = new Peer({
+                initiator: false,
+                trickle: false,
+                stream: userStream.current,
+                config: { iceServers: [{ urls: 'stun:turn.alpharegiment.in:3478' }] },
+            });
+
+            peer.on('signal', signal => socket.emit('BE-accept-call', { signal, to: from }));
+            peer.on('stream', stream => setRemoteStreams(prev => ({ ...prev, [from]: stream })));
+            peer.on('error', () => removePeer(from));
+            peer.on('close', () => removePeer(from));
+            peer.signal(signal);
+            peersRef.current.push({ peerID: from, peer });
+            setPeers([...peersRef.current]);
+        };
+
+        const handleCallAccepted = ({ signal, answerId }) => {
+            const item = peersRef.current.find(p => p.peerID === answerId);
+            if (item) item.peer.signal(signal);
+        };
+
+        const handleRaisedHand = ({ userId, userName }) => {
+            setRaisedHands(prev => prev.some(p => p.userId === userId) ? prev : [...prev, { userId, userName }]);
+        };
+
+        const handleSpeakerApproved = () => {
+            setIsApproved(true);
+
+            if (userStream.current) {
+                userStream.current.getAudioTracks().forEach(track => (track.enabled = true));
+                userStream.current.getVideoTracks().forEach(track => (track.enabled = true));
+                setIsAudioMuted(false);
+                setIsVideoOff(false);
+            }
+        };
+
+        const handleStopSpeaking = () => {
+            if (userStream.current) {
+                userStream.current.getAudioTracks().forEach(track => (track.enabled = false));
+                userStream.current.getVideoTracks().forEach(track => (track.enabled = false));
+            }
+            setIsApproved(false);
+            setIsAudioMuted(true);
+            setIsVideoOff(true);
+            setHandRaised(false);
+        };
+
+        const handleSpeakerDeclined = () => {
+            // Reset the viewer to pre-request state
+            setIsApproved(false);
+            setIsAudioMuted(true);
+            setIsVideoOff(true);
+            setHandRaised(false);
+
+            if (userStream.current) {
+                userStream.current.getAudioTracks().forEach(track => (track.enabled = false));
+                userStream.current.getVideoTracks().forEach(track => (track.enabled = false));
+            }
+        };
+
+        const handleDecline = () => {
+            setHandRaised(false);
+        };
+
+        socket.on('FE-speaker-declined', handleSpeakerDeclined);
+        socket.on('FE-viewer-stop-speaking', handleStopSpeaking); // viewer disables their stream
+        socket.on('FE-receive-call', handleReceiveCall);
+        socket.on('FE-call-accepted', handleCallAccepted);
+        socket.on('FE-raised-hand', handleRaisedHand);
+        socket.on('FE-speaker-approved', handleSpeakerApproved);
+        socket.on('FE-decline-speaker', handleDecline);
+
+        return () => {
+            socket.off('FE-receive-call', handleReceiveCall);
+            socket.off('FE-call-accepted', handleCallAccepted);
+            socket.off('FE-raised-hand', handleRaisedHand);
+            socket.off('FE-speaker-approved', handleSpeakerApproved);
+            socket.off('FE-viewer-stop-speaking', handleStopSpeaking);
+            socket.off('FE-speaker-declined', handleSpeakerDeclined);
+            socket.off('FE-decline-speaker', handleDecline);
+        };
+    }, [role]);
+
+    const createPeer = (userToCall, from, stream) => {
         const peer = new Peer({
-          initiator: false,
-          trickle: false,
-          stream: userStream.current,
-          config: {
-            iceServers: [
-              { urls: "stun:turn.alpharegiment.in:3478" },
-              {
-                urls: [
-                  "turn:turn.alpharegiment.in:3478?transport=udp",
-                  "turn:turn.alpharegiment.in:3478?transport=tcp",
-                ],
-                username: "1748689158",
-                credential: "BbAUIZlSN7g7YYSiai3wFd3utg=",
-              },
-              {
-                urls: "turns:turn.alpharegiment.in:5349",
-                username: "1748689158",
-                credential: "BbAUIZlSN7g7YYSiai3wFd3utg=",
-              },
-            ],
-          },
+            initiator: true,
+            trickle: false,
+            stream,
+            config: { iceServers: [{ urls: 'stun:turn.alpharegiment.in:3478' }] },
         });
 
-        peer.on('signal', (signal) => {
-          console.log('Viewer sending signal to broadcaster:', from);
-          socket.emit('BE-accept-call', { signal, to: from });
-        });
+        peer.on('signal', signal => socket.emit('BE-call-user', { userToCall, from, signal }));
+        peer.on('stream', stream => setRemoteStreams(prev => ({ ...prev, [userToCall]: stream })));
+        peer.on('error', () => removePeer(userToCall));
+        peer.on('close', () => removePeer(userToCall));
+        return peer;
+    };
 
-        peer.on('stream', (stream) => {
-          console.log('Viewer received stream from broadcaster:', stream.getAudioTracks().length > 0 ? 'Has audio' : 'No audio');
-          setRemoteStreams((prev) => ({ ...prev, [from]: stream }));
-        });
-
-        peer.on('error', (err) => {
-          console.error('Viewer peer error:', err);
-          removePeer(from);
-        });
-
-        peer.on('close', () => {
-          console.log('Viewer peer connection closed');
-          removePeer(from);
-        });
-
-        // Signal the peer with the incoming signal
-        peer.signal(signal);
-        peersRef.current.push({ peerID: from, peer });
+    const removePeer = (peerID) => {
+        peersRef.current = peersRef.current.filter(p => p.peerID !== peerID);
         setPeers([...peersRef.current]);
-      }
-    };
-
-    const handleCallAccepted = ({ signal, answerId }) => {
-      console.log('Call accepted by:', answerId);
-      const item = peersRef.current.find((p) => p.peerID === answerId);
-      if (item) {
-        console.log('Signaling peer with answer');
-        item.peer.signal(signal);
-      }
-    };
-
-    socket.on('FE-receive-call', handleReceiveCall);
-    socket.on('FE-call-accepted', handleCallAccepted);
-
-    return () => {
-      socket.off('FE-receive-call', handleReceiveCall);
-      socket.off('FE-call-accepted', handleCallAccepted);
-    };
-  }, [role]);
-
-  const createPeer = (userToCall, from, stream) => {
-    console.log('Creating peer for:', userToCall, 'Stream has audio:', stream.getAudioTracks().length > 0);
-    const peer = new Peer({
-      initiator: true,
-      trickle: false,
-      stream,
-      config: {
-        iceServers: [
-          { urls: "stun:turn.alpharegiment.in:3478" },
-          {
-            urls: [
-              "turn:turn.alpharegiment.in:3478?transport=udp",
-              "turn:turn.alpharegiment.in:3478?transport=tcp",
-            ],
-            username: "1748689158",
-            credential: "BbAUIZlSN7g7YYSiai3wFd3utg=",
-          },
-          {
-            urls: "turns:turn.alpharegiment.in:5349",
-            username: "1748689158",
-            credential: "BbAUIZlSN7g7YYSiai3wFd3utg=",
-          },
-        ],
-      },
-    });
-
-    peer.on('signal', (signal) => {
-      console.log('Broadcaster sending signal to viewer:', userToCall);
-      socket.emit('BE-call-user', { userToCall, from, signal });
-    });
-
-    peer.on('stream', (stream) => {
-      console.log('Broadcaster received stream from viewer:', stream.getAudioTracks().length > 0 ? 'Has audio' : 'No audio');
-      setRemoteStreams((prev) => ({ ...prev, [userToCall]: stream }));
-    });
-
-    peer.on('error', (err) => {
-      console.error('Broadcaster peer error:', err);
-      removePeer(userToCall);
-    });
-
-    peer.on('close', () => {
-      console.log('Broadcaster peer connection closed');
-      removePeer(userToCall);
-    });
-
-    return peer;
-  };
-
-  const removePeer = (peerID) => {
-    console.log('Removing peer:', peerID);
-    peersRef.current = peersRef.current.filter((p) => p.peerID !== peerID);
-    setPeers([...peersRef.current]);
-    setRemoteStreams((prev) => {
-      const updated = { ...prev };
-      delete updated[peerID];
-      return updated;
-    });
-  };
-
-  const toggleAudio = () => {
-    if (userStream.current) {
-      const audioTrack = userStream.current.getAudioTracks()[0];
-      if (audioTrack) {
-        const newMutedState = !isAudioMuted;
-        audioTrack.enabled = !newMutedState; // Enable track when not muted
-        setIsAudioMuted(newMutedState);
-
-        // Update all peer connections
-        peersRef.current.forEach(({ peer }) => {
-          if (peer._pc) {
-            const senders = peer._pc.getSenders();
-            const audioSender = senders.find(sender => sender.track?.kind === 'audio');
-            if (audioSender) {
-              audioSender.track.enabled = !newMutedState;
-            }
-          }
+        setRemoteStreams(prev => {
+            const updated = { ...prev };
+            delete updated[peerID];
+            return updated;
         });
-      }
-    }
-  };
+    };
 
-  const toggleVideo = () => {
-    if (userStream.current) {
-      const videoTrack = userStream.current.getVideoTracks()[0];
-      if (videoTrack) {
-        const newVideoOffState = !isVideoOff;
-        videoTrack.enabled = !newVideoOffState; // Enable track when not off
-        setIsVideoOff(newVideoOffState);
-
-        // Update all peer connections
-        peersRef.current.forEach(({ peer }) => {
-          if (peer._pc) {
-            const senders = peer._pc.getSenders();
-            const videoSender = senders.find(sender => sender.track?.kind === 'video');
-            if (videoSender) {
-              videoSender.track.enabled = !newVideoOffState;
+    const toggleAudio = () => {
+        if (userStream.current) {
+            const track = userStream.current.getAudioTracks()[0];
+            if (track) {
+                const newMuted = !isAudioMuted;
+                track.enabled = !newMuted;
+                setIsAudioMuted(newMuted);
             }
-          }
-        });
-      }
-    }
-  };
+        }
+    };
 
-  return (
-    <div style={{ textAlign: 'center', marginTop: 40 }}>
-      <h2>Room: {roomId}</h2>
+    const toggleVideo = () => {
+        if (userStream.current) {
+            const track = userStream.current.getVideoTracks()[0];
+            if (track) {
+                const newVideoOff = !isVideoOff;
+                track.enabled = !newVideoOff;
+                setIsVideoOff(newVideoOff);
+            }
+        }
+    };
 
-      {!role && (
-        <div style={{ margin: '30px 0' }}>
+    const stopSpeaking = () => {
+        if (userStream.current) {
+            userStream.current.getAudioTracks().forEach(track => (track.enabled = false));
+            userStream.current.getVideoTracks().forEach(track => (track.enabled = false));
+        }
+        setIsApproved(false);
+        setIsAudioMuted(true);
+        setIsVideoOff(true);
+        setHandRaised(false); // ✅ Enable "Request to Speak" again
+        socket.emit('BE-stop-speaking', { roomId, userId: socket.id });
+    };
+
+    return (
+        <div style={{ textAlign: 'center', marginTop: 40 }}>
+            <h2>Room: {roomId}</h2>
+
+            {!role && (
+                <div style={{ margin: '30px 0' }}>
+                    <button onClick={() => handleRoleSelect('broadcaster')} style={{ marginRight: 16, padding: '12px 24px', fontSize: 16 }}>Start as Broadcaster</button>
+                    <button onClick={() => handleRoleSelect('viewer')} style={{ padding: '12px 24px', fontSize: 16 }}>Join as Viewer</button>
+                </div>
+            )}
+
+            {role && <h3>Role: {role}</h3>}
+
+            {role === 'broadcaster' && (
+                <div>
+                    <video ref={userVideoRef} autoPlay muted playsInline style={{ width: '100%', maxWidth: 800, borderRadius: 8, background: '#000' }} />
+
+
+                    {approvedSpeakers.length > 0 && (
+  <div style={{ marginTop: 20 }}>
+    <h4>Currently Speaking</h4>
+    {approvedSpeakers.map(userId => (
+      <div key={userId} style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
+        <span>{userId}</span>
+        <button onClick={() => {
+          socket.emit('BE-stop-speaking', { roomId, userId });
+          setApprovedSpeakers(prev => prev.filter(id => id !== userId));
+        }}>
+          🛑 Stop Speaking
+        </button>
+      </div>
+    ))}
+  </div>
+)}
+
+
+
+                    {/* ✅ Viewer stream thumbnails */}
+                    <div
+                        style={{
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            gap: 10,
+                            justifyContent: 'center',
+                            marginTop: 20
+                        }}
+                    >
+                        {Object.entries(remoteStreams).map(([userId, stream]) => {
+                            const raisedUser = raisedHands.find(p => p.userId === userId);
+                            const isPendingApproval = raisedUser && !approvedSpeakers.includes(userId);
+
+                            return (
+                                <div key={userId} style={{ position: 'relative' }}>
+                                    <video
+                                        autoPlay
+                                        playsInline
+                                        ref={(el) => el && (el.srcObject = stream)}
+                                        style={{
+                                            width: 150,
+                                            height: 100,
+                                            borderRadius: 8,
+                                            objectFit: 'cover',
+                                            backgroundColor: '#000',
+                                        }}
+                                    />
+                                    {(isPendingApproval || approvedSpeakers.includes(userId)) && (
+  <div style={{
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    color: 'white',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 0,
+    margin: 0,
+    borderRadius: 8
+  }}>
+    {isPendingApproval && (
+      <>
+        <div style={{ fontSize: 32 }}>✋</div>
+        <div style={{ marginTop: 8, display: 'flex', gap: 10 }}>
           <button
-            onClick={() => handleRoleSelect('broadcaster')}
-            style={{ marginRight: 16, padding: '12px 24px', fontSize: 16 }}
-          >
-            Start as Broadcaster
-          </button>
-          <button
-            onClick={() => handleRoleSelect('viewer')}
-            style={{ padding: '12px 24px', fontSize: 16 }}
-          >
-            Join as Viewer
-          </button>
-        </div>
-      )}
-
-      {role && <h3>Role: {role}</h3>}
-
-      {role === 'broadcaster' && (
-        <div>
-          <div style={{ position: 'relative', maxWidth: 800, margin: '0 auto' }}>
-            <video
-              ref={userVideoRef}
-              autoPlay
-              muted
-              playsInline
-              style={{
-                width: '100%',
-                aspectRatio: '16/9',
-                borderRadius: 8,
-                backgroundColor: '#000'
-              }}
-            />
-            {/* Control buttons for broadcaster */}
-            <div style={{
-              position: 'absolute',
-              bottom: 20,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              display: 'flex',
-              gap: '16px',
-              background: 'rgba(0,0,0,0.5)',
-              padding: '8px 16px',
-              borderRadius: '24px'
-            }}>
-              <button
-                onClick={toggleAudio}
-                style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: '50%',
-                  border: 'none',
-                  background: isAudioMuted ? '#ff4444' : '#4CAF50',
-                  color: 'white',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '20px'
-                }}
-                title={isAudioMuted ? 'Unmute' : 'Mute'}
-              >
-                {isAudioMuted ? '🔇' : '🔊'}
-              </button>
-              <button
-                onClick={toggleVideo}
-                style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: '50%',
-                  border: 'none',
-                  background: isVideoOff ? '#ff4444' : '#4CAF50',
-                  color: 'white',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '20px'
-                }}
-                title={isVideoOff ? 'Turn on camera' : 'Turn off camera'}
-              >
-                {isVideoOff ? '📷' : '📹'}
-              </button>
-            </div>
-          </div>
-
-          <div
+            title="Approve"
+            onClick={() => {
+              setApprovedSpeakers(prev => [...prev, userId]);
+              socket.emit('BE-approve-speaker', { roomId, userId });
+              setRaisedHands(prev => prev.filter(p => p.userId !== userId));
+            }}
             style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 10,
-              justifyContent: 'center',
-              marginTop: 20
+              fontSize: 16,
+              padding: '6px 12px',
+              borderRadius: 6,
+              border: 'none',
+              background: '#4CAF50',
+              color: '#fff',
+              cursor: 'pointer'
             }}
           >
-            {Object.entries(remoteStreams).map(([id, stream]) => (
-              <video
-                key={id}
-                autoPlay
-                playsInline
-                ref={(el) => {
-                  if (el && stream) el.srcObject = stream;
-                }}
-                style={{
-                  width: 150,
-                  height: 100,
-                  border: '1px solid #ccc',
-                  borderRadius: 8,
-                }}
-              />
-            ))}
-          </div>
+            ✅ Approve
+          </button>
+          <button
+            title="Decline"
+            onClick={() => {
+              socket.emit('BE-decline-speaker', { roomId, userId });
+              setRaisedHands(prev => prev.filter(p => p.userId !== userId));
+            }}
+            style={{
+              fontSize: 16,
+              padding: '6px 12px',
+              borderRadius: 6,
+              border: 'none',
+              background: '#f44336',
+              color: '#fff',
+              cursor: 'pointer'
+            }}
+          >
+            ❌ Decline
+          </button>
         </div>
-      )}
+      </>
+    )}
 
-      {role === 'viewer' && (
-        <div style={{ position: 'relative', maxWidth: 800, margin: '0 auto' }}>
-          {/* Main broadcast stream */}
-          <div style={{ width: '100%', backgroundColor: '#000', borderRadius: 8, overflow: 'hidden' }}>
-            {Object.entries(remoteStreams).map(([id, stream]) => (
-              <video
-                key={id}
-                autoPlay
-                playsInline
-                ref={(el) => {
-                  if (el && stream) el.srcObject = stream;
-                }}
-                style={{
-                  width: '100%',
-                  aspectRatio: '16/9',
-                  objectFit: 'contain'
-                }}
-              />
-            ))}
-            {Object.keys(remoteStreams).length === 0 && (
-              <div style={{
-                width: '100%',
-                aspectRatio: '16/9',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'white',
-                backgroundColor: '#000'
-              }}>
-                No stream received yet. Waiting for broadcaster...
-              </div>
+    {approvedSpeakers.includes(userId) && (
+      <button
+        onClick={() => {
+          socket.emit('BE-stop-speaking', { roomId, userId });
+          setApprovedSpeakers(prev => prev.filter(id => id !== userId));
+        }}
+        style={{
+          marginTop: 8,
+          fontSize: 16,
+          padding: '6px 12px',
+          borderRadius: 6,
+          border: 'none',
+          background: '#f44336',
+          color: '#fff',
+          cursor: 'pointer'
+        }}
+      >
+        🛑 Stop Speaking
+      </button>
+    )}
+  </div>
+)}
+
+
+
+                                </div>
+                            );
+                        })}
+
+                    </div>
+                </div>
             )}
-          </div>
 
-          {/* Self view in bottom right */}
-          <div style={{
-            position: 'absolute',
-            bottom: 20,
-            right: 20,
-            width: 200,
-            height: 150,
-            borderRadius: 8,
-            overflow: 'hidden',
-            border: '2px solid white',
-            boxShadow: '0 0 10px rgba(0,0,0,0.5)',
-            backgroundColor: '#000'
-          }}>
-            <video
-              ref={userVideoRef}
-              autoPlay
-              playsInline
-              muted
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'cover',
-                transform: 'scaleX(-1)' // Mirror the self view
-              }}
-            />
-            <div style={{
-              position: 'absolute',
-              bottom: 0,
-              left: 0,
-              right: 0,
-              background: 'rgba(0,0,0,0.7)',
-              color: 'white',
-              textAlign: 'center',
-              padding: '4px',
-              fontSize: '12px'
-            }}>
-              Your Camera
-            </div>
-            {/* Control buttons */}
-            <div style={{
-              position: 'absolute',
-              top: 8,
-              right: 8,
-              display: 'flex',
-              gap: '8px'
-            }}>
-              <button
-                onClick={toggleAudio}
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: '50%',
-                  border: 'none',
-                  background: isAudioMuted ? '#ff4444' : '#4CAF50',
-                  color: 'white',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '16px'
-                }}
-                title={isAudioMuted ? 'Unmute' : 'Mute'}
-              >
-                {isAudioMuted ? '🔇' : '🔊'}
-              </button>
-              <button
-                onClick={toggleVideo}
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: '50%',
-                  border: 'none',
-                  background: isVideoOff ? '#ff4444' : '#4CAF50',
-                  color: 'white',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '16px'
-                }}
-                title={isVideoOff ? 'Turn on camera' : 'Turn off camera'}
-              >
-                {isVideoOff ? '📷' : '📹'}
-              </button>
-            </div>
-          </div>
+            {role === 'viewer' && (
+                <div style={{ position: 'relative', maxWidth: 800, margin: '0 auto' }}>
+                    <div style={{ width: '100%', backgroundColor: '#000', borderRadius: 8 }}>
+                        {Object.entries(remoteStreams).map(([id, stream]) => (
+                            <video key={id} autoPlay playsInline ref={(el) => el && (el.srcObject = stream)} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'contain' }} />
+                        ))}
+                        {Object.keys(remoteStreams).length === 0 && (
+                            <div style={{ width: '100%', aspectRatio: '16/9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
+                                Waiting for broadcaster...
+                            </div>
+                        )}
+                    </div>
+                    <div style={{
+                        position: 'absolute', bottom: 20, right: 20, width: 200, height: 150, borderRadius: 8, overflow: 'hidden',
+                        border: '2px solid white', backgroundColor: '#000'
+                    }}>
+                        <video ref={userVideoRef} autoPlay playsInline muted style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }} />
+                        <div style={{
+                            position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(0,0,0,0.7)', color: 'white',
+                            textAlign: 'center', padding: '4px', fontSize: '12px'
+                        }}>
+                            Your Camera
+                        </div>
+                        <div style={{
+                            position: 'absolute', top: 8, right: 8, display: 'flex',
+                            flexDirection: 'row', gap: '8px'
+                        }}>
+                            {isApproved ? (
+                                <>
+                                    {/* Mic Toggle */}
+                                    <button
+                                        onClick={toggleAudio}
+                                        style={{
+                                            width: 32, height: 32, borderRadius: '50%', border: 'none',
+                                            background: isAudioMuted ? '#ff4444' : '#4CAF50',
+                                            color: 'white', cursor: 'pointer', fontSize: '16px'
+                                        }}
+                                    >
+                                        {isAudioMuted ? '🔇' : '🔊'}
+                                    </button>
+
+                                    {/* Camera Toggle */}
+                                    <button
+                                        onClick={toggleVideo}
+                                        style={{
+                                            width: 32, height: 32, borderRadius: '50%', border: 'none',
+                                            background: isVideoOff ? '#ff4444' : '#4CAF50',
+                                            color: 'white', cursor: 'pointer', fontSize: '16px'
+                                        }}
+                                    >
+                                        {isVideoOff ? '📷' : '📹'}
+                                    </button>
+
+                                    {/* Stop Speaking */}
+                                    <button
+                                        onClick={stopSpeaking}
+                                        style={{
+                                            width: 'auto', padding: '4px 12px', borderRadius: '12px', border: 'none',
+                                            background: '#f44336', color: 'white', cursor: 'pointer',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px'
+                                        }}
+                                    >
+                                        🛑 Stop Speaking
+                                    </button>
+                                </>
+                            ) : (
+                                <button
+                                    disabled={handRaised}
+                                    onClick={() => {
+                                        if (!handRaised) {
+                                            socket.emit('BE-raise-hand', {
+                                                roomId,
+                                                userId: socket.id,
+                                                userName: 'User ' + socket.id,
+                                            });
+                                            setHandRaised(true);
+                                        }
+                                    }}
+                                    style={{
+                                        width: 'auto', padding: '4px 12px', borderRadius: '12px', border: 'none',
+                                        background: '#ffc107', color: 'black', cursor: handRaised ? 'not-allowed' : 'pointer',
+                                        opacity: handRaised ? 0.5 : 1,
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px'
+                                    }}
+                                >
+                                    🎤 Request to Speak
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
-      )}
-    </div>
-  );
+    );
 };
 
 export default Room;
