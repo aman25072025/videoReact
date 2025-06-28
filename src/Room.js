@@ -47,8 +47,6 @@ const Room = ({ roomId }) => {
             });
     };
 
-
-
     useEffect(() => {
         return () => {
             if (joined) {
@@ -102,7 +100,24 @@ const Room = ({ roomId }) => {
                 initiator: false,
                 trickle: false,
                 stream: userStream.current,
-                config: { iceServers: [{ urls: 'stun:turn.alpharegiment.in:3478' }] },
+                config: {
+                    iceServers: [
+                      { urls: "stun:turn.alpharegiment.in:3478" },
+                      {
+                        urls: [
+                          "turn:turn.alpharegiment.in:3478?transport=udp",
+                          "turn:turn.alpharegiment.in:3478?transport=tcp",
+                        ],
+                        username: "1748689158",
+                        credential: "BbAUIZlSN7g7YYSiai3wFd3utg=",
+                      },
+                      {
+                        urls: "turns:turn.alpharegiment.in:5349",
+                        username: "1748689158",
+                        credential: "BbAUIZlSN7g7YYSiai3wFd3utg=",
+                      },
+                    ],
+                  },
             });
 
             peer.on('signal', signal => socket.emit('BE-accept-call', { signal, to: from }));
