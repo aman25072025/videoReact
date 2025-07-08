@@ -19,6 +19,8 @@ const Room = ({ roomId }) => {
     const [raisedHands, setRaisedHands] = useState([]); // List of viewers who raised hand
     const [isApproved, setIsApproved] = useState(false); // Is viewer approved to speak
     const [approvedSpeakers, setApprovedSpeakers] = useState([]); // List of approved speakers
+    const [isScreenSharing, setIsScreenSharing] = useState(false);
+    const screenStreamRef = useRef(null);
 
     // Handle role selection and join room
     const handleRoleSelect = (selectedRole) => {
@@ -295,6 +297,58 @@ const Room = ({ roomId }) => {
         socket.emit('BE-stop-speaking', { roomId, userId: socket.id });
     };
 
+    // Start screen sharing
+    const startScreenShare = async () => {
+        try {
+            const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+            screenStreamRef.current = screenStream;
+            setIsScreenSharing(true);
+    
+            // Replace tracks in all peer connections
+            peersRef.current.forEach(({ peer }) => {
+                const sender = peer._pc.getSenders().find(s => s.track?.kind === 'video');
+                if (sender) {
+                    sender.replaceTrack(screenStream.getVideoTracks()[0]);
+                }
+            });
+    
+            // Also update broadcaster's own video view
+            if (userVideoRef.current) {
+                userVideoRef.current.srcObject = screenStream;
+            }
+    
+            // When screen sharing stops, revert back to camera
+            screenStream.getVideoTracks()[0].onended = () => {
+                stopScreenShare();
+            };
+        } catch (err) {
+            console.error('Screen share error:', err);
+        }
+    };
+
+    // Stop screen sharing
+    const stopScreenShare = () => {
+        const videoTrack = userStream.current?.getVideoTracks()[0];
+        if (!videoTrack) return;
+    
+        peersRef.current.forEach(({ peer }) => {
+            const sender = peer._pc.getSenders().find(s => s.track?.kind === 'video');
+            if (sender) {
+                sender.replaceTrack(videoTrack);
+            }
+        });
+    
+        if (userVideoRef.current) {
+            userVideoRef.current.srcObject = userStream.current;
+        }
+    
+        screenStreamRef.current?.getTracks().forEach(track => track.stop());
+        screenStreamRef.current = null;
+        setIsScreenSharing(false);
+    };
+    
+    
+
     // --- UI Rendering ---
     return (
         <div style={{ textAlign: 'center', marginTop: 40 }}>
@@ -315,6 +369,24 @@ const Room = ({ roomId }) => {
                 <div>
                     {/* Broadcaster's own video */}
                     <video ref={userVideoRef} autoPlay muted playsInline style={{ width: '100%', maxWidth: 800, borderRadius: 8, background: '#000' }} />
+
+                    <div style={{ marginTop: 10 }}>
+    {!isScreenSharing ? (
+        <button
+            onClick={startScreenShare}
+            style={{ padding: '8px 16px', background: '#2196F3', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}
+        >
+            🖥️ Share Screen
+        </button>
+    ) : (
+        <button
+            onClick={stopScreenShare}
+            style={{ padding: '8px 16px', background: '#f44336', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}
+        >
+            ❌ Stop Sharing
+        </button>
+    )}
+</div>
 
                     {/* List of currently approved speakers */}
                     {approvedSpeakers.length > 0 && (
