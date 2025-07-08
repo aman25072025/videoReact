@@ -2,31 +2,35 @@ import React, { useEffect, useRef, useState } from 'react';
 import Peer from 'simple-peer';
 import socket from './socket';
 
+// Main Room component for video/audio streaming and role management
 const Room = ({ roomId }) => {
-    const [role, setRole] = useState(null);
-    const [peers, setPeers] = useState([]);
-    const [remoteStreams, setRemoteStreams] = useState({});
-    const [joined, setJoined] = useState(false);
-    const [isAudioMuted, setIsAudioMuted] = useState(false);
-    const [isVideoOff, setIsVideoOff] = useState(false);
-    const [handRaised, setHandRaised] = useState(false);
-    const userVideoRef = useRef();
-    const userStream = useRef();
-    const peersRef = useRef([]);
-    const [broadcasterId, setBroadcasterId] = useState(null);
-    const [raisedHands, setRaisedHands] = useState([]);
-    const [isApproved, setIsApproved] = useState(false);
-    const [approvedSpeakers, setApprovedSpeakers] = useState([]);
+    // State variables for role, peers, streams, UI, etc.
+    const [role, setRole] = useState(null); // 'broadcaster' or 'viewer'
+    const [peers, setPeers] = useState([]); // List of peer connections
+    const [remoteStreams, setRemoteStreams] = useState({}); // Remote user streams
+    const [joined, setJoined] = useState(false); // Has the user joined the room
+    const [isAudioMuted, setIsAudioMuted] = useState(false); // Audio muted state
+    const [isVideoOff, setIsVideoOff] = useState(false); // Video off state
+    const [handRaised, setHandRaised] = useState(false); // Has the viewer raised hand
+    const userVideoRef = useRef(); // Ref for user's video element
+    const userStream = useRef(); // Ref for user's media stream
+    const peersRef = useRef([]); // Ref for peer connections
+    const [broadcasterId, setBroadcasterId] = useState(null); // Current broadcaster's socket id
+    const [raisedHands, setRaisedHands] = useState([]); // List of viewers who raised hand
+    const [isApproved, setIsApproved] = useState(false); // Is viewer approved to speak
+    const [approvedSpeakers, setApprovedSpeakers] = useState([]); // List of approved speakers
 
+    // Handle role selection and join room
     const handleRoleSelect = (selectedRole) => {
         setRole(selectedRole);
         const userName = 'User-' + Date.now();
         socket.emit('BE-join-room', { roomId, userName, role: selectedRole });
         setJoined(true);
 
+        // Get user media (camera/mic)
         navigator.mediaDevices.getUserMedia({ video: true, audio: true })
             .then((stream) => {
-                // 👇 Disable mic and camera *before* assigning to video element
+                // Disable mic/camera for viewers initially
                 if (selectedRole === 'viewer') {
                     stream.getAudioTracks().forEach(track => (track.enabled = false));
                     stream.getVideoTracks().forEach(track => (track.enabled = false));
@@ -47,6 +51,7 @@ const Room = ({ roomId }) => {
             });
     };
 
+    // Cleanup on component unmount or leave
     useEffect(() => {
         return () => {
             if (joined) {
@@ -58,6 +63,7 @@ const Room = ({ roomId }) => {
         };
     }, [joined, roomId]);
 
+    // Listen for role assignment from server
     useEffect(() => {
         const handleAssignRole = ({ role, broadcasterId }) => {
             setRole(role);
@@ -67,9 +73,11 @@ const Room = ({ roomId }) => {
         return () => socket.off('FE-assign-role', handleAssignRole);
     }, []);
 
+    // Handle user join events and viewer stopped events (for broadcaster)
     useEffect(() => {
         if (!role) return;
 
+        // When a new user joins, broadcaster creates a peer connection
         const handleUserJoin = (users) => {
             if (role !== 'broadcaster') return;
             users.forEach(({ userId }) => {
@@ -79,10 +87,11 @@ const Room = ({ roomId }) => {
                 setPeers([...peersRef.current]);
             });
         };
+        // Remove from approved speakers if viewer stopped
         const handleViewerStopped = ({ userId }) => {
             setApprovedSpeakers(prev => prev.filter(id => id !== userId));
         };
-        socket.on('FE-viewer-stopped', handleViewerStopped); // broadcaster removes from approved list
+        socket.on('FE-viewer-stopped', handleViewerStopped);
         socket.on('FE-user-join', handleUserJoin);
         return () => {
             socket.off('FE-viewer-stopped', handleViewerStopped);
@@ -90,9 +99,11 @@ const Room = ({ roomId }) => {
         };
     }, [role]);
 
+    // Handle peer signaling, hand raise, approval, etc.
     useEffect(() => {
         if (!role) return;
 
+        // When receiving a call (peer connection request)
         const handleReceiveCall = ({ signal, from }) => {
             if (peersRef.current.some(p => p.peerID === from)) return;
 
@@ -102,22 +113,22 @@ const Room = ({ roomId }) => {
                 stream: userStream.current,
                 config: {
                     iceServers: [
-                      { urls: "stun:turn.alpharegiment.in:3478" },
-                      {
-                        urls: [
-                          "turn:turn.alpharegiment.in:3478?transport=udp",
-                          "turn:turn.alpharegiment.in:3478?transport=tcp",
-                        ],
-                        username: "1748689158",
-                        credential: "BbAUIZlSN7g7YYSiai3wFd3utg=",
-                      },
-                      {
-                        urls: "turns:turn.alpharegiment.in:5349",
-                        username: "1748689158",
-                        credential: "BbAUIZlSN7g7YYSiai3wFd3utg=",
-                      },
+                        { urls: "stun:turn.alpharegiment.in:3478" },
+                        {
+                            urls: [
+                                "turn:turn.alpharegiment.in:3478?transport=udp",
+                                "turn:turn.alpharegiment.in:3478?transport=tcp",
+                            ],
+                            username: "1748689158",
+                            credential: "BbAUIZlSN7g7YYSiai3wFd3utg=",
+                        },
+                        {
+                            urls: "turns:turn.alpharegiment.in:5349",
+                            username: "1748689158",
+                            credential: "BbAUIZlSN7g7YYSiai3wFd3utg=",
+                        },
                     ],
-                  },
+                },
             });
 
             peer.on('signal', signal => socket.emit('BE-accept-call', { signal, to: from }));
@@ -129,15 +140,18 @@ const Room = ({ roomId }) => {
             setPeers([...peersRef.current]);
         };
 
+        // When a call is accepted, signal the peer
         const handleCallAccepted = ({ signal, answerId }) => {
             const item = peersRef.current.find(p => p.peerID === answerId);
             if (item) item.peer.signal(signal);
         };
 
+        // When a viewer raises hand
         const handleRaisedHand = ({ userId, userName }) => {
             setRaisedHands(prev => prev.some(p => p.userId === userId) ? prev : [...prev, { userId, userName }]);
         };
 
+        // When a viewer is approved to speak
         const handleSpeakerApproved = () => {
             setIsApproved(true);
 
@@ -149,6 +163,7 @@ const Room = ({ roomId }) => {
             }
         };
 
+        // When a viewer is told to stop speaking
         const handleStopSpeaking = () => {
             if (userStream.current) {
                 userStream.current.getAudioTracks().forEach(track => (track.enabled = false));
@@ -160,8 +175,8 @@ const Room = ({ roomId }) => {
             setHandRaised(false);
         };
 
+        // When a viewer's request to speak is declined
         const handleSpeakerDeclined = () => {
-            // Reset the viewer to pre-request state
             setIsApproved(false);
             setIsAudioMuted(true);
             setIsVideoOff(true);
@@ -173,18 +188,21 @@ const Room = ({ roomId }) => {
             }
         };
 
+        // When a viewer's hand raise is declined
         const handleDecline = () => {
             setHandRaised(false);
         };
 
+        // Register all socket event listeners
         socket.on('FE-speaker-declined', handleSpeakerDeclined);
-        socket.on('FE-viewer-stop-speaking', handleStopSpeaking); // viewer disables their stream
+        socket.on('FE-viewer-stop-speaking', handleStopSpeaking);
         socket.on('FE-receive-call', handleReceiveCall);
         socket.on('FE-call-accepted', handleCallAccepted);
         socket.on('FE-raised-hand', handleRaisedHand);
         socket.on('FE-speaker-approved', handleSpeakerApproved);
         socket.on('FE-decline-speaker', handleDecline);
 
+        // Cleanup listeners on unmount
         return () => {
             socket.off('FE-receive-call', handleReceiveCall);
             socket.off('FE-call-accepted', handleCallAccepted);
@@ -196,6 +214,7 @@ const Room = ({ roomId }) => {
         };
     }, [role]);
 
+    // Create a new peer connection (for broadcaster)
     const createPeer = (userToCall, from, stream) => {
         const peer = new Peer({
             initiator: true,
@@ -203,22 +222,22 @@ const Room = ({ roomId }) => {
             stream,
             config: {
                 iceServers: [
-                  { urls: "stun:turn.alpharegiment.in:3478" },
-                  {
-                    urls: [
-                      "turn:turn.alpharegiment.in:3478?transport=udp",
-                      "turn:turn.alpharegiment.in:3478?transport=tcp",
-                    ],
-                    username: "1748689158",
-                    credential: "BbAUIZlSN7g7YYSiai3wFd3utg=",
-                  },
-                  {
-                    urls: "turns:turn.alpharegiment.in:5349",
-                    username: "1748689158",
-                    credential: "BbAUIZlSN7g7YYSiai3wFd3utg=",
-                  },
+                    { urls: "stun:turn.alpharegiment.in:3478" },
+                    {
+                        urls: [
+                            "turn:turn.alpharegiment.in:3478?transport=udp",
+                            "turn:turn.alpharegiment.in:3478?transport=tcp",
+                        ],
+                        username: "1748689158",
+                        credential: "BbAUIZlSN7g7YYSiai3wFd3utg=",
+                    },
+                    {
+                        urls: "turns:turn.alpharegiment.in:5349",
+                        username: "1748689158",
+                        credential: "BbAUIZlSN7g7YYSiai3wFd3utg=",
+                    },
                 ],
-              }
+            }
         });
 
         peer.on('signal', signal => socket.emit('BE-call-user', { userToCall, from, signal }));
@@ -228,6 +247,7 @@ const Room = ({ roomId }) => {
         return peer;
     };
 
+    // Remove a peer connection and its stream
     const removePeer = (peerID) => {
         peersRef.current = peersRef.current.filter(p => p.peerID !== peerID);
         setPeers([...peersRef.current]);
@@ -238,6 +258,7 @@ const Room = ({ roomId }) => {
         });
     };
 
+    // Toggle user's audio (mute/unmute)
     const toggleAudio = () => {
         if (userStream.current) {
             const track = userStream.current.getAudioTracks()[0];
@@ -249,6 +270,7 @@ const Room = ({ roomId }) => {
         }
     };
 
+    // Toggle user's video (on/off)
     const toggleVideo = () => {
         if (userStream.current) {
             const track = userStream.current.getVideoTracks()[0];
@@ -260,6 +282,7 @@ const Room = ({ roomId }) => {
         }
     };
 
+    // Stop speaking (viewer disables their stream)
     const stopSpeaking = () => {
         if (userStream.current) {
             userStream.current.getAudioTracks().forEach(track => (track.enabled = false));
@@ -268,14 +291,16 @@ const Room = ({ roomId }) => {
         setIsApproved(false);
         setIsAudioMuted(true);
         setIsVideoOff(true);
-        setHandRaised(false); // ✅ Enable "Request to Speak" again
+        setHandRaised(false);
         socket.emit('BE-stop-speaking', { roomId, userId: socket.id });
     };
 
+    // --- UI Rendering ---
     return (
         <div style={{ textAlign: 'center', marginTop: 40 }}>
             <h2>Room: {roomId}</h2>
 
+            {/* Role selection buttons */}
             {!role && (
                 <div style={{ margin: '30px 0' }}>
                     <button onClick={() => handleRoleSelect('broadcaster')} style={{ marginRight: 16, padding: '12px 24px', fontSize: 16 }}>Start as Broadcaster</button>
@@ -285,31 +310,31 @@ const Room = ({ roomId }) => {
 
             {role && <h3>Role: {role}</h3>}
 
+            {/* Broadcaster UI */}
             {role === 'broadcaster' && (
                 <div>
+                    {/* Broadcaster's own video */}
                     <video ref={userVideoRef} autoPlay muted playsInline style={{ width: '100%', maxWidth: 800, borderRadius: 8, background: '#000' }} />
 
-
+                    {/* List of currently approved speakers */}
                     {approvedSpeakers.length > 0 && (
-  <div style={{ marginTop: 20 }}>
-    <h4>Currently Speaking</h4>
-    {approvedSpeakers.map(userId => (
-      <div key={userId} style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
-        <span>{userId}</span>
-        <button onClick={() => {
-          socket.emit('BE-stop-speaking', { roomId, userId });
-          setApprovedSpeakers(prev => prev.filter(id => id !== userId));
-        }}>
-          🛑 Stop Speaking
-        </button>
-      </div>
-    ))}
-  </div>
-)}
+                        <div style={{ marginTop: 20 }}>
+                            <h4>Currently Speaking</h4>
+                            {approvedSpeakers.map(userId => (
+                                <div key={userId} style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
+                                    <span>{userId}</span>
+                                    <button onClick={() => {
+                                        socket.emit('BE-stop-speaking', { roomId, userId });
+                                        setApprovedSpeakers(prev => prev.filter(id => id !== userId));
+                                    }}>
+                                        🛑 Stop Speaking
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
 
-
-
-                    {/* ✅ Viewer stream thumbnails */}
+                    {/* Thumbnails for all remote viewer streams */}
                     <div
                         style={{
                             display: 'flex',
@@ -325,6 +350,7 @@ const Room = ({ roomId }) => {
 
                             return (
                                 <div key={userId} style={{ position: 'relative' }}>
+                                    {/* Remote viewer's video */}
                                     <video
                                         autoPlay
                                         playsInline
@@ -337,103 +363,104 @@ const Room = ({ roomId }) => {
                                             backgroundColor: '#000',
                                         }}
                                     />
+                                    {/* Overlay for hand raise or speaking status */}
                                     {(isPendingApproval || approvedSpeakers.includes(userId)) && (
-  <div style={{
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    color: 'white',
-    display: 'flex',
-    flexDirection: 'column',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 0,
-    margin: 0,
-    borderRadius: 8
-  }}>
-    {isPendingApproval && (
-      <>
-        <div style={{ fontSize: 32 }}>✋</div>
-        <div style={{ marginTop: 8, display: 'flex', gap: 10 }}>
-          <button
-            title="Approve"
-            onClick={() => {
-              setApprovedSpeakers(prev => [...prev, userId]);
-              socket.emit('BE-approve-speaker', { roomId, userId });
-              setRaisedHands(prev => prev.filter(p => p.userId !== userId));
-            }}
-            style={{
-              fontSize: 16,
-              padding: '6px 12px',
-              borderRadius: 6,
-              border: 'none',
-              background: '#4CAF50',
-              color: '#fff',
-              cursor: 'pointer'
-            }}
-          >
-            ✅ Approve
-          </button>
-          <button
-            title="Decline"
-            onClick={() => {
-              socket.emit('BE-decline-speaker', { roomId, userId });
-              setRaisedHands(prev => prev.filter(p => p.userId !== userId));
-            }}
-            style={{
-              fontSize: 16,
-              padding: '6px 12px',
-              borderRadius: 6,
-              border: 'none',
-              background: '#f44336',
-              color: '#fff',
-              cursor: 'pointer'
-            }}
-          >
-            ❌ Decline
-          </button>
-        </div>
-      </>
-    )}
+                                        <div style={{
+                                            position: 'absolute',
+                                            top: 0,
+                                            left: 0,
+                                            right: 0,
+                                            bottom: 0,
+                                            backgroundColor: 'rgba(0,0,0,0.6)',
+                                            color: 'white',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            justifyContent: 'center',
+                                            alignItems: 'center',
+                                            padding: 0,
+                                            margin: 0,
+                                            borderRadius: 8
+                                        }}>
+                                            {/* Approve/Decline buttons for hand raise */}
+                                            {isPendingApproval && (
+                                                <>
+                                                    <div style={{ fontSize: 32 }}>✋</div>
+                                                    <div style={{ marginTop: 8, display: 'flex', gap: 10 }}>
+                                                        <button
+                                                            title="Approve"
+                                                            onClick={() => {
+                                                                setApprovedSpeakers(prev => [...prev, userId]);
+                                                                socket.emit('BE-approve-speaker', { roomId, userId });
+                                                                setRaisedHands(prev => prev.filter(p => p.userId !== userId));
+                                                            }}
+                                                            style={{
+                                                                fontSize: 16,
+                                                                padding: '6px 12px',
+                                                                borderRadius: 6,
+                                                                border: 'none',
+                                                                background: '#4CAF50',
+                                                                color: '#fff',
+                                                                cursor: 'pointer'
+                                                            }}
+                                                        >
+                                                            ✅ Approve
+                                                        </button>
+                                                        <button
+                                                            title="Decline"
+                                                            onClick={() => {
+                                                                socket.emit('BE-decline-speaker', { roomId, userId });
+                                                                setRaisedHands(prev => prev.filter(p => p.userId !== userId));
+                                                            }}
+                                                            style={{
+                                                                fontSize: 16,
+                                                                padding: '6px 12px',
+                                                                borderRadius: 6,
+                                                                border: 'none',
+                                                                background: '#f44336',
+                                                                color: '#fff',
+                                                                cursor: 'pointer'
+                                                            }}
+                                                        >
+                                                            ❌ Decline
+                                                        </button>
+                                                    </div>
+                                                </>
+                                            )}
 
-    {approvedSpeakers.includes(userId) && (
-      <button
-        onClick={() => {
-          socket.emit('BE-stop-speaking', { roomId, userId });
-          setApprovedSpeakers(prev => prev.filter(id => id !== userId));
-        }}
-        style={{
-          marginTop: 8,
-          fontSize: 16,
-          padding: '6px 12px',
-          borderRadius: 6,
-          border: 'none',
-          background: '#f44336',
-          color: '#fff',
-          cursor: 'pointer'
-        }}
-      >
-        🛑 Stop Speaking
-      </button>
-    )}
-  </div>
-)}
-
-
-
+                                            {/* Stop Speaking button for approved speakers */}
+                                            {approvedSpeakers.includes(userId) && (
+                                                <button
+                                                    onClick={() => {
+                                                        socket.emit('BE-stop-speaking', { roomId, userId });
+                                                        setApprovedSpeakers(prev => prev.filter(id => id !== userId));
+                                                    }}
+                                                    style={{
+                                                        marginTop: 8,
+                                                        fontSize: 16,
+                                                        padding: '6px 12px',
+                                                        borderRadius: 6,
+                                                        border: 'none',
+                                                        background: '#f44336',
+                                                        color: '#fff',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                >
+                                                    🛑 Stop Speaking
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             );
                         })}
-
                     </div>
                 </div>
             )}
 
+            {/* Viewer UI */}
             {role === 'viewer' && (
                 <div style={{ position: 'relative', maxWidth: 800, margin: '0 auto' }}>
+                    {/* Broadcaster's video(s) */}
                     <div style={{ width: '100%', backgroundColor: '#000', borderRadius: 8 }}>
                         {Object.entries(remoteStreams).map(([id, stream]) => (
                             <video key={id} autoPlay playsInline ref={(el) => el && (el.srcObject = stream)} style={{ width: '100%', aspectRatio: '16/9', objectFit: 'contain' }} />
@@ -444,6 +471,7 @@ const Room = ({ roomId }) => {
                             </div>
                         )}
                     </div>
+                    {/* User's own camera preview and controls */}
                     <div style={{
                         position: 'absolute', bottom: 20, right: 20, width: 200, height: 150, borderRadius: 8, overflow: 'hidden',
                         border: '2px solid white', backgroundColor: '#000'
@@ -455,6 +483,7 @@ const Room = ({ roomId }) => {
                         }}>
                             Your Camera
                         </div>
+                        {/* Controls for mic/camera/raise hand/stop speaking */}
                         <div style={{
                             position: 'absolute', top: 8, right: 8, display: 'flex',
                             flexDirection: 'row', gap: '8px'
