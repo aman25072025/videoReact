@@ -359,202 +359,286 @@ const Room = ({ roomId }) => {
 
       {/* Broadcaster UI */}
       {role === 'broadcaster' && (
-        <div>
-          {/* Broadcaster's own video */}
-          <video ref={userVideoRef} autoPlay muted playsInline style={{ width: '100%', maxWidth: 800, borderRadius: 8, background: '#000' }} />
+  <div style={{ display: 'flex', alignItems: 'flex-start', position: 'relative' }}>
+    {/* Left: Broadcaster content */}
+    <div style={{ flex: 1, paddingRight: 240 }}>
+      {/* Broadcaster's own video */}
+      <video
+        ref={userVideoRef}
+        autoPlay
+        muted
+        playsInline
+        style={{
+          width: '100%',
+          maxWidth: 800,
+          borderRadius: 8,
+          background: '#000',
+        }}
+      />
 
-          <div style={{ marginTop: 10 }}>
-            {!isScreenSharing ? (
-              <button
-                onClick={startScreenShare}
-                style={{ padding: '8px 16px', background: '#2196F3', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}
-              >
-                🖥️ Share Screen
-              </button>
-            ) : (
-              <button
-                onClick={stopScreenShare}
-                style={{ padding: '8px 16px', background: '#f44336', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}
-              >
-                ❌ Stop Sharing
-              </button>
-            )}
-
-            {/* Mic and Camera Toggle Buttons */}
-            <div style={{ marginTop: 10, display: 'flex', gap: 10, justifyContent: 'center' }}>
-              {/* Toggle Mic */}
-              <button
-                onClick={toggleAudio}
-                style={{
-                  padding: '8px 16px',
-                  background: isAudioMuted ? '#ff4444' : '#4CAF50',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 6,
-                  cursor: 'pointer'
-                }}
-              >
-                {isAudioMuted ? '🔇 Mute' : '🔊 Unmute'}
-              </button>
-
-              {/* Toggle Camera */}
-              <button
-                onClick={toggleVideo}
-                style={{
-                  padding: '8px 16px',
-                  background: isVideoOff ? '#ff4444' : '#4CAF50',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 6,
-                  cursor: 'pointer'
-                }}
-              >
-                {isVideoOff ? '📷 Off' : '📹 On'}
-              </button>
-            </div>
-
-          </div>
-
-          {/* List of currently approved speakers */}
-          {approvedSpeakers.length > 0 && (
-            <div style={{ marginTop: 20 }}>
-              <h4>Currently Speaking</h4>
-              {approvedSpeakers.map(userId => (
-                <div key={userId} style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
-                  <span>{userId}</span>
-                  <button onClick={() => {
-                    socket.emit('BE-stop-speaking', { roomId, userId });
-                    setApprovedSpeakers(prev => prev.filter(id => id !== userId));
-                  }}>
-                    🛑 Stop Speaking
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Thumbnails for all remote viewer streams */}
-          <div
+      {/* Screen sharing buttons */}
+      <div style={{ marginTop: 10 }}>
+        {!isScreenSharing ? (
+          <button
+            onClick={startScreenShare}
             style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 10,
-              justifyContent: 'center',
-              marginTop: 20
+              padding: '8px 16px',
+              background: '#2196F3',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 6,
+              cursor: 'pointer',
             }}
           >
-            {Object.entries(remoteStreams).map(([userId, stream]) => {
-              const raisedUser = raisedHands.find(p => p.userId === userId);
-              const isPendingApproval = raisedUser && !approvedSpeakers.includes(userId);
+            🖥️ Share Screen
+          </button>
+        ) : (
+          <button
+            onClick={stopScreenShare}
+            style={{
+              padding: '8px 16px',
+              background: '#f44336',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 6,
+              cursor: 'pointer',
+            }}
+          >
+            ❌ Stop Sharing
+          </button>
+        )}
 
-              return (
-                <div key={userId} style={{ position: 'relative' }}>
-                  {/* Remote viewer's video */}
-                  <video
-                    autoPlay
-                    playsInline
-                    ref={(el) => el && (el.srcObject = stream)}
-                    style={{
-                      width: 150,
-                      height: 100,
-                      borderRadius: 8,
-                      objectFit: 'cover',
-                      backgroundColor: '#000',
-                    }}
-                  />
-                  {/* Overlay for hand raise or speaking status */}
-                  {(isPendingApproval || approvedSpeakers.includes(userId)) && (
-                    <div style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      backgroundColor: 'rgba(0,0,0,0.6)',
-                      color: 'white',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'center',
-                      alignItems: 'center',
-                      padding: 0,
-                      margin: 0,
-                      borderRadius: 8
-                    }}>
-                      {/* Approve/Decline buttons for hand raise */}
-                      {isPendingApproval && (
-                        <>
-                          <div style={{ fontSize: 32 }}>✋</div>
-                          <div style={{ marginTop: 8, display: 'flex', gap: 10 }}>
-                            <button
-                              title="Approve"
-                              onClick={() => {
-                                setApprovedSpeakers(prev => [...prev, userId]);
-                                socket.emit('BE-approve-speaker', { roomId, userId });
-                                setRaisedHands(prev => prev.filter(p => p.userId !== userId));
-                              }}
-                              style={{
-                                fontSize: 16,
-                                padding: '6px 12px',
-                                borderRadius: 6,
-                                border: 'none',
-                                background: '#4CAF50',
-                                color: '#fff',
-                                cursor: 'pointer'
-                              }}
-                            >
-                              ✅ Approve
-                            </button>
-                            <button
-                              title="Decline"
-                              onClick={() => {
-                                socket.emit('BE-decline-speaker', { roomId, userId });
-                                setRaisedHands(prev => prev.filter(p => p.userId !== userId));
-                              }}
-                              style={{
-                                fontSize: 16,
-                                padding: '6px 12px',
-                                borderRadius: 6,
-                                border: 'none',
-                                background: '#f44336',
-                                color: '#fff',
-                                cursor: 'pointer'
-                              }}
-                            >
-                              ❌ Decline
-                            </button>
-                          </div>
-                        </>
-                      )}
+        {/* Mic and Camera Toggle Buttons */}
+        <div style={{ marginTop: 10, display: 'flex', gap: 10, justifyContent: 'center' }}>
+          <button
+            onClick={toggleAudio}
+            style={{
+              padding: '8px 16px',
+              background: isAudioMuted ? '#ff4444' : '#4CAF50',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 6,
+              cursor: 'pointer',
+            }}
+          >
+            {isAudioMuted ? '🔇 Mute' : '🔊 Unmute'}
+          </button>
+          <button
+            onClick={toggleVideo}
+            style={{
+              padding: '8px 16px',
+              background: isVideoOff ? '#ff4444' : '#4CAF50',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 6,
+              cursor: 'pointer',
+            }}
+          >
+            {isVideoOff ? '📷 Off' : '📹 On'}
+          </button>
+        </div>
+      </div>
 
-                      {/* Stop Speaking button for approved speakers */}
-                      {approvedSpeakers.includes(userId) && (
+      {/* Approved Speakers List */}
+      {approvedSpeakers.length > 0 && (
+        <div style={{ marginTop: 20 }}>
+          <h4>Currently Speaking</h4>
+          {approvedSpeakers.map((userId) => (
+            <div
+              key={userId}
+              style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}
+            >
+              <span>{userId}</span>
+              <button
+                onClick={() => {
+                  socket.emit('BE-stop-speaking', { roomId, userId });
+                  setApprovedSpeakers((prev) => prev.filter((id) => id !== userId));
+                }}
+              >
+                🛑 Stop Speaking
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Viewer Thumbnails */}
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 10,
+          justifyContent: 'center',
+          marginTop: 20,
+        }}
+      >
+        {Object.entries(remoteStreams).map(([userId, stream]) => {
+          const raisedUser = raisedHands.find((p) => p.userId === userId);
+          const isPendingApproval = raisedUser && !approvedSpeakers.includes(userId);
+
+          return (
+            <div key={userId} style={{ position: 'relative' }}>
+              <video
+                autoPlay
+                playsInline
+                ref={(el) => el && (el.srcObject = stream)}
+                style={{
+                  width: 150,
+                  height: 100,
+                  borderRadius: 8,
+                  objectFit: 'cover',
+                  backgroundColor: '#000',
+                }}
+              />
+              {(isPendingApproval || approvedSpeakers.includes(userId)) && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: 'rgba(0,0,0,0.6)',
+                    color: 'white',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    padding: 0,
+                    margin: 0,
+                    borderRadius: 8,
+                  }}
+                >
+                  {isPendingApproval && (
+                    <>
+                      <div style={{ fontSize: 32 }}>✋</div>
+                      <div style={{ marginTop: 8, display: 'flex', gap: 10 }}>
                         <button
+                          title="Approve"
                           onClick={() => {
-                            socket.emit('BE-stop-speaking', { roomId, userId });
-                            setApprovedSpeakers(prev => prev.filter(id => id !== userId));
+                            setApprovedSpeakers((prev) => [...prev, userId]);
+                            socket.emit('BE-approve-speaker', { roomId, userId });
+                            setRaisedHands((prev) => prev.filter((p) => p.userId !== userId));
                           }}
                           style={{
-                            marginTop: 8,
+                            fontSize: 16,
+                            padding: '6px 12px',
+                            borderRadius: 6,
+                            border: 'none',
+                            background: '#4CAF50',
+                            color: '#fff',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          ✅ Approve
+                        </button>
+                        <button
+                          title="Decline"
+                          onClick={() => {
+                            socket.emit('BE-decline-speaker', { roomId, userId });
+                            setRaisedHands((prev) => prev.filter((p) => p.userId !== userId));
+                          }}
+                          style={{
                             fontSize: 16,
                             padding: '6px 12px',
                             borderRadius: 6,
                             border: 'none',
                             background: '#f44336',
                             color: '#fff',
-                            cursor: 'pointer'
+                            cursor: 'pointer',
                           }}
                         >
-                          🛑 Stop Speaking
+                          ❌ Decline
                         </button>
-                      )}
-                    </div>
+                      </div>
+                    </>
+                  )}
+                  {approvedSpeakers.includes(userId) && (
+                    <button
+                      onClick={() => {
+                        socket.emit('BE-stop-speaking', { roomId, userId });
+                        setApprovedSpeakers((prev) => prev.filter((id) => id !== userId));
+                      }}
+                      style={{
+                        marginTop: 8,
+                        fontSize: 16,
+                        padding: '6px 12px',
+                        borderRadius: 6,
+                        border: 'none',
+                        background: '#f44336',
+                        color: '#fff',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      🛑 Stop Speaking
+                    </button>
                   )}
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+
+    {/* Right: Sidebar for viewers */}
+    <div
+  style={{
+    position: 'absolute',
+    top: 20,
+    right: 20,
+    width: 260,
+    padding: '16px',
+    background: '#f9f9f9',
+    color: '#333',
+    borderRadius: 12,
+    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.15)',
+    maxHeight: '80vh',
+    overflowY: 'auto',
+    fontFamily: 'sans-serif',
+    border: '1px solid #ddd'
+  }}
+>
+  <h4
+    style={{
+      margin: '0 0 12px',
+      fontSize: '16px',
+      borderBottom: '1px solid #ddd',
+      paddingBottom: 8,
+      color: '#222'
+    }}
+  >
+    👥 Viewers <span style={{ fontWeight: 'normal', fontSize: 14 }}>({Object.keys(remoteStreams).length})</span>
+  </h4>
+
+  <ul style={{ listStyleType: 'none', padding: 0, margin: 0 }}>
+    {Object.keys(remoteStreams).map((userId, index) => (
+      <li
+        key={userId}
+        style={{
+          marginBottom: 8,
+          padding: '8px 12px',
+          background: index % 2 === 0 ? '#ffffff' : '#f1f1f1',
+          borderRadius: 6,
+          wordBreak: 'break-word',
+          fontSize: 13,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          border: '1px solid #eee'
+        }}
+      >
+        <span style={{ fontSize: 14 }}>👤</span>
+        <span>{userId}</span>
+      </li>
+    ))}
+  </ul>
+</div>
+
+
+  </div>
+)}
+
 
       {/* Viewer UI */}
       {role === 'viewer' && (
