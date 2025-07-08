@@ -178,7 +178,7 @@ const Room = ({ roomId }) => {
         };
 
         // When a viewer's request to speak is declined
-        const handleSpeakerDeclined = () => {
+        const handleDecline = () => {
             setIsApproved(false);
             setIsAudioMuted(true);
             setIsVideoOff(true);
@@ -190,13 +190,7 @@ const Room = ({ roomId }) => {
             }
         };
 
-        // When a viewer's hand raise is declined
-        const handleDecline = () => {
-            setHandRaised(false);
-        };
-
         // Register all socket event listeners
-        socket.on('FE-speaker-declined', handleSpeakerDeclined);
         socket.on('FE-viewer-stop-speaking', handleStopSpeaking);
         socket.on('FE-receive-call', handleReceiveCall);
         socket.on('FE-call-accepted', handleCallAccepted);
@@ -211,7 +205,6 @@ const Room = ({ roomId }) => {
             socket.off('FE-raised-hand', handleRaisedHand);
             socket.off('FE-speaker-approved', handleSpeakerApproved);
             socket.off('FE-viewer-stop-speaking', handleStopSpeaking);
-            socket.off('FE-speaker-declined', handleSpeakerDeclined);
             socket.off('FE-decline-speaker', handleDecline);
         };
     }, [role]);
